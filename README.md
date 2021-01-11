@@ -1,127 +1,185 @@
-# Docker Stack For [InvenTree](https://github.com/inventree/InvenTree)
+# Docker Stack For [InvenTree](https://github.com/inventree/InvenTree)/Postgres
 
-[![Docker Hub](https://img.shields.io/docker/cloud/build/zeigren/inventree)](https://hub.docker.com/r/zeigren/inventree)
-[![MicroBadger](https://images.microbadger.com/badges/image/zeigren/inventree.svg)](https://microbadger.com/images/zeigren/inventree)
-[![MicroBadger](https://images.microbadger.com/badges/version/zeigren/inventree.svg)](https://microbadger.com/images/zeigren/inventree)
-[![MicroBadger](https://images.microbadger.com/badges/commit/zeigren/inventree.svg)](https://microbadger.com/images/zeigren/inventree)
-![Docker Pulls](https://img.shields.io/docker/pulls/zeigren/inventree)
+Forked from [Zeigren/iventree-docker](https://github.com/Zeigren/inventree-docker) 
 
 ## Usage
 
-Use [Docker Compose](https://docs.docker.com/compose/) or [Docker Swarm](https://docs.docker.com/engine/swarm/) to deploy InvenTree for either development or production. Templates included for using NGINX or Traefik for SSL termination.
+```bash
+git checkout https://github.com/rcludwick/inventree-docker
+```
 
-## Links
+Create your docker compose file:
 
-### [Docker Hub](https://hub.docker.com/r/zeigren/inventree)
+```yaml
+  db:
+    image: postgres
+    container_name: db
+    networks:
+      - db
+    expose:
+      - 5432/tcp
+    secrets:
+      - postgres_password
+      - postgres_user
+    environment:
+      - PGDATA=/var/lib/postgresql/data/pgdb
+      - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password
+      - POSTGRES_USER_FILE=/run/secrets/postgres_user
+    volumes:
+      - /mnt/dockerdata/postgres/data:/var/lib/postgresql/data
+    restart: unless-stopped
 
-### [GitHub](https://github.com/Zeigren/inventree-docker)
+  inventree:
+    build: ./inventree-docker
+    container_name: inventree
+    expose:
+      - 9767/tcp
+    networks:
+      - proxy
+      - db
+    depends_on:
+      - db
+    volumes:
+      - /mnt/dockerdata/inventree/static:/usr/src/static
+      - /mnt/dockerdata/inventree/media:/usr/src/media
+    secrets:
+      - postgres_password
+      - postgres_user
+    environment:
+      # CREATE SUPERUSER ONCE THEN DELETE THESE
+      - CREATE_SUPERUSER=False
+      - DJANGO_SUPERUSER_USERNAME=admin
+      - DJANGO_SUPERUSER_EMAIL=admin@admin.com
+      - DJANGO_SUPERUSER_PASSWORD=admin
+      # Database Connection
+      - DATABASE_NAME=inventree
+      - DATABASE_USER_FILE=/run/secrets/postgres_user
+      - DATABASE_PASSWORD_FILE=/run/secrets/postgres_password
+      - DATABASE_PORT=5432
+      - DATABASE_HOST=db
+    restart: unless-stopped
+```
 
-## Tags
+Configure the configuration in ```docker-entrypoint.sh``` to you liking:
 
-Tags follow this naming scheme:
+```yaml
+# Database backend selection - Configure backend database settings
+# Ref: https://docs.djangoproject.com/en/2.2/ref/settings/#std:setting-DATABASES
+# Specify database parameters below as they appear in the Django docs
+database:
+  
+  ENGINE: ${DATABASE_ENGINE:-django.db.backends.postgresql_psycopg2}
+  NAME: ${DATABASE_NAME:-inventree}
+  USER: ${DATABASE_USER:-inventree}
+  PASSWORD: ${DATABASE_PASSWORD:-CHANGEME}
+  HOST: ${DATABASE_HOST:-db}
+  PORT: ${DATABASE_PORT:-5432}
 
-- \*.\*.\* - InvenTree Release Tag
-- InvenTree Tag-Commit Stub (A commit on master newer than the InvenTree Release Tag)
-- latest (this will be the same as the newest InvenTree Tag-Commit Stub)
+# Select default system language (default is 'en-us')
+language: ${DEFAULT_LANGUAGE:-en-us}
 
-Using the Release Tags is recommended.
+#Currencies to use
+currencies:
+  - USD
+  - AUD
+  - CAD
+  - EUR
+  - GBP
+  - JPY
+  - NZD
 
-### Release Tags
+# Set debug to False to run in production mode
+debug: ${DEBUG:-False}
 
-- v0.1.3
-- 0.1.1
-- 0.1.0
-- 0.0.10
-- 0.0.8
+# Set the default logging level:
+log_level: ${LOG_LEVEL:-DEBUG}
 
-## Stack
+# Leave this as star and assume set the appropriate gunicorn configuration in Dockerfile
+allowed_hosts:
+  - ${ALLOWED_HOSTS:-'*'}
 
-- [Python:Alpine](https://hub.docker.com/_/python) for InvenTree
-- [NGINX:Alpine](https://hub.docker.com/_/nginx)
-- [MariaDB:10](https://hub.docker.com/_/mariadb)
+# Cross Origin Resource Sharing (CORS) settings (see https://github.com/ottoyiu/django-cors-headers)
+# Following parameters are 
+cors:
+  # CORS_ORIGIN_ALLOW_ALL - If True, the whitelist will not be used and all origins will be accepted.
+  allow_all: ${CORS_ALLOW_ALL:-True}
+  
+  # CORS_ORIGIN_WHITELIST - A list of origins that are authorized to make cross-site HTTP requests. Defaults to []
+  # whitelist:
+  # - https://example.com
+  # - https://sub.example.com
 
-### For Development
+# MEDIA_ROOT is the local filesystem location for storing uploaded files
+# By default, it is stored in a directory named 'media' local to the InvenTree directory
+# This should be changed for a production installation
+media_root: ${MEDIA_ROOT:-'/usr/src/media'}
 
-- [phpMyAdmin](https://hub.docker.com/r/phpmyadmin/phpmyadmin/)
+# STATIC_ROOT is the local filesystem location for storing static files
+# By default it is stored in a directory named 'static' local to the InvenTree directory
+static_root: ${STATIC_ROOT:-'/usr/src/static'}
 
-## Configuration
+# Optional URL schemes to allow in URL fields
+# By default, only the following schemes are allowed: ['http', 'https', 'ftp', 'ftps']
+# Uncomment the lines below to allow extra schemes
+#extra_url_schemes:
+#  - mailto
+#  - git
+#  - ssh
 
-Configuration consists of variables in the `.yml` and `.conf` files.
+# Set debug_toolbar to True to enable a debugging toolbar for InvenTree
+# Note: This will only be displayed if DEBUG mode is enabled, 
+#       and only if InvenTree is accessed from a local IP (127.0.0.1)
+debug_toolbar: ${DEBUG_TOOLBAR:-False}
 
-- inventree_vhost = A simple NGINX vhost file for InvenTree (templates included, use `inventree_vhost_ssl` if you're using NGINX for SSL termination)
-- Make whatever changes you need to the appropriate `.yml`. All environment variables for InvenTree can be found in `docker-entrypoint.sh`
+# Backup options
+# Set the backup_dir parameter to store backup files in a specific location
+# If unspecified, the local user's temp directory will be used
+backup_dir: ${BACKUP_DIR:-'/home/inventree/backup/'}
 
-### Using NGINX for SSL Termination
+# Sentry.io integration
+# If you have a sentry.io account, it can be used to log server errors
+# Ensure sentry_sdk is installed by running 'pip install sentry-sdk'
+sentry:
+  enabled: ${SENTRY_ENABLED:-False}
+  dsn: ${SENTRY_DSN:-}
 
-- yourdomain.com.crt = The SSL certificate for your domain (you'll need to create/copy this)
-- yourdomain.com.key = The SSL key for your domain (you'll need to create/copy this)
+# LaTeX report rendering
+# InvenTree uses the django-tex plugin to enable LaTeX report rendering
+# Ref: https://pypi.org/project/django-tex/
+# Note: Ensure that a working LaTeX toolchain is installed and working *before* starting the server
+latex:
+  # Select the LaTeX interpreter to use for PDF rendering
+  # Note: The intepreter needs to be installed on the system!
+  # e.g. to install pdflatex: apt-get texlive-latex-base
+  enabled: ${LATEX_ENABLED:-False}
+  # interpreter: pdflatex 
+  # Extra options to pass through to the LaTeX interpreter
+  # options: ''
+```
 
-### [Docker Compose](https://docs.docker.com/compose/)
+Modify the ip whitelist in the Dockerfile
 
-Using [multiple Docker Compose files](https://docs.docker.com/compose/extends/#multiple-compose-files) makes it easier to differentiate between use cases. `docker-compose.yml` is the base configuration file and `production.yml` or `development.yml` are used to either add to or override the base configuration.
+```Dockerfile
+# Modify --forwarded-allow-ips to whitelist specific IP addresses.
+CMD ["gunicorn", "--log-file=-", "--forwarded-allow-ips=*", "--workers=2", "--threads=4", "--worker-class=gthread", "--bind=:9767", "InvenTree.wsgi"]
+```
 
-Clone the [repository](https://github.com/Zeigren/inventree-docker), create a `config` folder inside the `inventree-docker` directory, and put the relevant configuration files you created/modified into it.
+Create the Docker secrets and expose them to the containers.  
 
-Run with `docker-compose -f docker-compose.yml -f production.yml up -d`. View using `127.0.0.1:9080`.
+Create the database in postgresql, this can be done by changing ```expose``` to ```ports``` and then logging in with pgcli with the username and password.
 
-### [Docker Swarm](https://docs.docker.com/engine/swarm/)
+```postgresql
+CREATE DATABASE inventree;
+```
 
-I personally use this with [Traefik](https://traefik.io/) as a reverse proxy, I've included an example `traefik.yml` but it's not necessary.
+Build and run in docker compose:
 
-You'll need to create the appropriate [Docker Secrets](https://docs.docker.com/engine/swarm/secrets/) and [Docker Configs](https://docs.docker.com/engine/swarm/configs/).
+```bash
+docker-compose build inventree && docker-compose up -d inventree
+```
 
-Run with `docker stack deploy --compose-file docker-swarm.yml inventree`
+To check to see if it's smoothly running:
 
-## Deployment
-
-On first run you'll need to create a superuser using the variables in the `.yml` file. You will also need to migrate the database and collect static files by changing the `MIGRATE_STATIC` variable in the `.yml` file, this also needs to be done everytime InvenTree is updated.
-
-## Theory of operation
-
-### InvenTree
-
-The [Dockerfile](https://docs.docker.com/engine/reference/builder/) uses [multi-stage builds](https://docs.docker.com/develop/develop-images/multistage-build/), [build hooks](https://docs.docker.com/docker-hub/builds/advanced/#build-hook-examples), and [labels](http://label-schema.org/rc1/#build-time-labels) for automated builds on Docker Hub.
-
-The multi-stage build creates a container that can be used for development and another for production. The development container has all the build dependencies for the python packages which are installed into a [python virtual environment](https://docs.python.org/3/tutorial/venv.html). The production container copies the python virtual environment from the development container and runs InvenTree from there, this allows it to be much more lightweight.
-
-On startup, the container first runs the `docker-entrypoint.sh` script before running the `gunicorn -c gunicorn.conf.py InvenTree.wsgi` command.
-
-`docker-entrypoint.sh` creates configuration files and runs commands based on environment variables that are declared in the various `.yml` files.
-
-`env_secrets_expand.sh` handles using Docker Secrets.
-
-### Nginx
-
-Used as a web server. It serves up the static files and passes everything else off to gunicorn/InvenTree.
-
-### MariaDB
-
-SQL database.
-
-## Development
-
-### Run
-
-Clone the [InvenTree](https://github.com/inventree/InvenTree) repository into a folder called `InvenTree` and build the development Docker image by running `docker build . --target development -t inventree:development`. Then use `docker-compose -f docker-compose.yml -f development.yml up -d` to grab all the other Docker images and run InvenTree.
-
-### InvenTree Development
-
-The clone you made of InvenTree replaces the one in the Docker container when the container is started (as seen in `development.yml`). So any changes you make are reflected in the Docker container (you may need to restart the container for those changes to take effect).
-
-If you want to develop/test using the production container you can build it using `docker build . --target production -t inventree:production`, then change the image tag in `development.yml`.
-
-### Python
-
-If you need to change which python packages are installed you can create/alter the `dev_requirements.txt` file and uncomment the line in the `Dockerfile`. Then run `docker build . --target development -t inventree:development`  to rebuild the container, this will install `dev_requirements.txt` instead of the default InvenTree `requirements.txt`.
-
-### Docs
-
-If you installed the required packages using `dev_requirements.txt` you can make the docs by running `docker exec -it inventree -w /usr/src/app make docs`.
-
-### phpMyAdmin
-
-Useful for database administration, you can connect to phpMyAdmin at `127.0.0.1:6060`.
-
-### VSCode
-
-You can use VSCode to work in the container directly on either your computer or a remote one. I've included a sample `devcontainer.json` for that purpose. You'll need to check the [official documentation](https://code.visualstudio.com/docs/remote/containers) to set that up.
+```bash
+docker-compose logs -f inventree
+```

@@ -1,6 +1,29 @@
 #!/bin/sh
-source /env_secrets_expand.sh
+
 set -e
+
+export DATABASE_HOST=${DATABASE_HOST:-db}
+export DATABASE_PORT=${DATABASE_PORT:-5432}
+
+export DEBUG=True
+
+if [ -z "$DATABASE_USER" ]; then
+    if [ -f "$DATABASE_USER_FILE" ]; then
+        export DATABASE_USER=$(cat $DATABASE_USER_FILE)
+    else
+        echo "No DATABASE_USER or DATABASE_USER_FILE set"
+        exit 1
+    fi
+fi
+
+if [ -z "$DATABASE_PASSWORD" ]; then
+    if [ -f "$DATABASE_PASSWORD_FILE" ]; then
+        export DATABASE_PASSWORD=$(cat $DATABASE_PASSWORD_FILE)
+    else
+        echo "No DATABASE_PASSWORD or DATABASE_PASSWORD_FILE set"
+        exit 1
+    fi
+fi
 
 cat > "$INVENTREE_HOME/config.yaml" <<EOF
 # Database backend selection - Configure backend database settings
@@ -8,19 +31,31 @@ cat > "$INVENTREE_HOME/config.yaml" <<EOF
 # Specify database parameters below as they appear in the Django docs
 database:
   
-  # Example Configuration - MySQL
-  ENGINE: ${DATABASE_ENGINE:-django.db.backends.mysql}
+  ENGINE: ${DATABASE_ENGINE:-django.db.backends.postgresql_psycopg2}
   NAME: ${DATABASE_NAME:-inventree}
   USER: ${DATABASE_USER:-inventree}
   PASSWORD: ${DATABASE_PASSWORD:-CHANGEME}
-  HOST: ${DATABASE_HOST:-mariadb}
-  PORT: ${DATABASE_PORT:-3306}
+  HOST: ${DATABASE_HOST:-db}
+  PORT: ${DATABASE_PORT:-5432}
 
 # Select default system language (default is 'en-us')
 language: ${DEFAULT_LANGUAGE:-en-us}
 
+#Currencies to use
+currencies:
+  - USD
+  - AUD
+  - CAD
+  - EUR
+  - GBP
+  - JPY
+  - NZD
+
 # Set debug to False to run in production mode
 debug: ${DEBUG:-False}
+
+# Set the default logging level:
+log_level: ${LOG_LEVEL:-DEBUG}
 
 # Allowed hosts (see ALLOWED_HOSTS in Django settings documentation)
 # A list of strings representing the host/domain names that this Django site can serve.
@@ -106,24 +141,23 @@ fi
 
 echo "Test connection to database"
 
-/wait-for.sh ${DATABASE_HOST:-mariadb}:${DATABASE_PORT:-3306} -- echo 'Success!'
+/wait-for.sh ${DATABASE_HOST:-db}:${DATABASE_PORT:-5432} -- echo 'Success!'
 
 echo "Give the database a few seconds to warm up"
 
-sleep 5s
+sleep 10
 
-if [ "$MIGRATE_STATIC" = "True" ]; then
-  echo "Running InvenTree database migrations and collecting static files..."
-  python manage.py makemigrations
-  python manage.py migrate
-  python manage.py migrate --run-syncdb
-  python manage.py check
-  python manage.py collectstatic --noinput
-  echo "InvenTree static files collected and database migrations completed!"
-fi
+echo "Running InvenTree database migrations and collecting static files..."
+python manage.py check || exit 1
+python manage.py collectstatic --noinput || exit 1
+python manage.py migrate --noinput || exit 1
+python manage.py clearsessions || exit 1
+echo "InvenTree static files collected and database migrations completed!"
 
 if [ "$CREATE_SUPERUSER" = "True" ]; then
   python manage.py createsuperuser --noinput
 fi
 
-exec "$@"
+exec gunicorn --access-logfile=- --error-logfile=- --log-level=INFO --forwarded-allow-ips='*' --workers=2 --threads=4 --worker-class=gthread --bind=0.0.0.0:9767 InvenTree.wsgi
+
+
