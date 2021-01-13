@@ -1,10 +1,7 @@
-ARG VERSION=master
-ARG DOCKER_TAG=latest
-
 FROM python:alpine AS production
 
-ARG VERSION
-ARG DOCKER_TAG
+ARG VERSION=master
+RUN echo installing $VERSION of inventree
 
 ENV PYTHONUNBUFFERED 1
 ENV INVENTREE_ROOT="/usr/src/app"
@@ -13,7 +10,9 @@ ENV INVENTREE_STATIC="/usr/src/static"
 ENV INVENTREE_MEDIA="/usr/src/media"
 ENV VIRTUAL_ENV="/opt/venv"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+ENV INVENTREE_REPO="https://github.com/rcludwick/InvenTree.git"
 
+RUN echo "Installing ${VERSION} of inventree from ${INVENTREE_REPO}"
 
 RUN apk add --no-cache gcc libgcc g++ libstdc++ postgresql-contrib postgresql-dev
 RUN apk add --no-cache libjpeg-turbo zlib jpeg libffi zlib-dev cairo pango gdk-pixbuf musl libpq fontconfig
@@ -25,9 +24,7 @@ RUN python -m venv $VIRTUAL_ENV && pip install --upgrade pip setuptools wheel
 RUN python -m venv $VIRTUAL_ENV && pip install --no-cache-dir -U gunicorn
 RUN python -m venv $VIRTUAL_ENV && pip install --no-cache-dir -U psycopg2 pgcli ipython
 
-RUN if [ $DOCKER_TAG = latest ] ; \
-    then git clone --branch master --depth 1 https://github.com/inventree/InvenTree.git ${INVENTREE_ROOT} ; \
-    else git clone --branch ${VERSION} --depth 1 https://github.com/inventree/InvenTree.git ${INVENTREE_ROOT} ; fi
+RUN git clone --branch $VERSION --depth 1 ${INVENTREE_REPO} ${INVENTREE_ROOT}
 
 ENV DEV_FILE="False"
 RUN python -m venv $VIRTUAL_ENV && pip install --no-cache-dir -U -r /usr/src/app/requirements.txt
